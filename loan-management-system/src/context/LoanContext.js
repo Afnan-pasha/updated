@@ -431,9 +431,16 @@ export const LoanProvider = ({ children }) => {
   };
 
   // Mark all notifications as read for a user/role view
-  const markAllNotificationsRead = (userId, userRole) => {
-    const toMark = getNotifications(userId, userRole).filter(n => !n.read);
-    toMark.forEach(n => dispatch({ type: LOAN_ACTIONS.MARK_NOTIFICATION_READ, payload: n.id }));
+  const markAllNotificationsRead = async (userId, userRole) => {
+    try {
+      const currentNotifications = state.notifications || [];
+      if (Array.isArray(currentNotifications)) {
+        const toMark = currentNotifications.filter(n => !n.read);
+        toMark.forEach(n => dispatch({ type: LOAN_ACTIONS.MARK_NOTIFICATION_READ, payload: n.id }));
+      }
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
   };
 
   // Clear error

@@ -57,11 +57,23 @@ const Layout = ({ children, userType }) => {
   useEffect(() => {
     if (userType === 'customer') {
       // Load notifications when component mounts
-      getNotifications();
+      const loadNotifications = async () => {
+        try {
+          await getNotifications(user?.id, userType);
+        } catch (error) {
+          console.error('Error loading notifications:', error);
+        }
+      };
+      
+      loadNotifications();
       
       // Set up real-time polling every 5 seconds for production-like behavior
-      const interval = setInterval(() => {
-        getNotifications();
+      const interval = setInterval(async () => {
+        try {
+          await getNotifications(user?.id, userType);
+        } catch (error) {
+          console.error('Error polling notifications:', error);
+        }
       }, 5000); // 5 seconds for real-time feel
 
       return () => clearInterval(interval);
