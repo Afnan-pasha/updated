@@ -47,6 +47,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLoan } from '../../context/LoanContext';
 import { motion } from 'framer-motion';
+import loanService from '../../services/loanService';
+import documentService from '../../services/documentService';
 
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
@@ -264,10 +266,10 @@ const ApplyLoan = () => {
     // but show warning
     if (activeStep === 4 && formData.references.length < 2) {
       const proceed = window.confirm(
-        '📋 Reference Information\n\n' +
+        'Reference Information\n\n' +
         'You have added ' + formData.references.length + ' reference(s).\n' +
         'At least 2 references are recommended for faster processing.\n\n' +
-        '✅ You can continue with fewer references, but it may take longer to process your application.\n\n' +
+        'You can continue with fewer references, but it may take longer to process your application.\n\n' +
         'Would you like to continue to the review step?'
       );
       if (proceed) {
@@ -303,25 +305,85 @@ const ApplyLoan = () => {
     setLoading(true);
     
     try {
-      const applicationData = {
-        ...formData,
-        userId: user?.id || 'guest',
-        submittedAt: new Date().toISOString(),
-        status: 'submitted',
-        applicationId: 'APP' + Date.now(),
+      // Step 1: Submit loan application to backend
+      const loanApplicationData = {
+        loanType: formData.loanType,
+        loanAmount: parseFloat(formData.loanAmount),
+        interestRate: 12.5, // Default rate
+        loanTermMonths: parseInt(formData.loanDuration) * 12, // Convert years to months
+        purpose: formData.loanPurpose,
+        collateral: 'None'
       };
 
-      const result = await createApplication(applicationData);
+      const loanResult = await loanService.applyForLoan(loanApplicationData);
       
-      if (result.success) {
-        alert(' Congratulations! Your loan application has been submitted successfully!\n\n📋 Application ID: ' + applicationData.applicationId + '\n⏰ Expected Review Time: 24-48 hours\n📧 You will receive updates via email and SMS\n\nThank you for choosing Standard Chartered!');
-        navigate('/customer');
-      } else {
-        alert(' Application Submission Failed\n\n' + (result.error || 'We encountered an issue while processing your application. Please try again or contact our support team.'));
+      if (!loanResult.id) {
+        throw new Error('Failed to create loan application');
       }
+
+      // Step 2: Upload documents if any exist
+      const documentsToUpload = [];
+      
+      // Personal documents
+      if (formData.aadharCard) documentsToUpload.push({ file: formData.aadharCard, documentType: 'ID_PROOF' });
+      if (formData.panCard) documentsToUpload.push({ file: formData.panCard, documentType: 'ID_PROOF' });
+      if (formData.addressProof) documentsToUpload.push({ file: formData.addressProof, documentType: 'ADDRESS_PROOF' });
+      
+      // Employment documents
+      if (formData.employmentProof) documentsToUpload.push({ file: formData.employmentProof, documentType: 'EMPLOYMENT_PROOF' });
+      if (formData.paySlips && formData.paySlips.length > 0) {
+        formData.paySlips.forEach(paySlip => {
+          documentsToUpload.push({ file: paySlip, documentType: 'INCOME_PROOF' });
+        });
+      }
+      if (formData.bankStatements && formData.bankStatements.length > 0) {
+        formData.bankStatements.forEach(statement => {
+          documentsToUpload.push({ file: statement, documentType: 'BANK_STATEMENT' });
+        });
+      }
+
+      // Upload documents if any
+      if (documentsToUpload.length > 0) {
+        const uploadResults = await documentService.uploadMultipleDocuments(loanResult.id, documentsToUpload);
+        console.log(`Uploaded ${uploadResults.totalUploaded} documents successfully`);
+        if (uploadResults.totalFailed > 0) {
+          console.warn(`Failed to upload ${uploadResults.totalFailed} documents`);
+        }
+      }
+
+      // Step 3: Create references in backend
+      if (formData.references && formData.references.length > 0) {
+        try {
+          for (const reference of formData.references) {
+            await loanService.createReference(loanResult.id, reference);
+          }
+          console.log(`Created ${formData.references.length} references successfully`);
+        } catch (error) {
+          console.warn('Failed to create some references:', error);
+        }
+      }
+
+      // Step 4: Create existing loans in backend
+      if (formData.existingLoans && formData.existingLoans.length > 0) {
+        try {
+          for (const existingLoan of formData.existingLoans) {
+            await loanService.createExistingLoan(loanResult.id, existingLoan);
+          }
+          console.log(`Created ${formData.existingLoans.length} existing loans successfully`);
+        } catch (error) {
+          console.warn('Failed to create some existing loans:', error);
+        }
+      }
+
+      // Application is now stored in backend database only
+      // No need to create in local context to avoid duplicates
+      
+      alert(`Application Submitted Successfully\n\nYour loan application has been submitted and is now under review.\n\nApplication ID: ${loanResult.id}\nLoan Amount: ₹${loanResult.loanAmount?.toLocaleString()}\nMonthly EMI: ₹${loanResult.monthlyEmi?.toLocaleString()}\nExpected Review Time: 24-48 hours\n\nYou will receive updates via email and SMS regarding the status of your application.\n\nWe appreciate your business.`);
+      navigate('/customer');
+      
     } catch (error) {
       console.error('Submission error:', error);
-      alert(' An error occurred while submitting your application. Please try again.');
+      alert(`Application Submission Failed\n\n${error.message || 'We encountered an issue while processing your application. Please try again or contact our support team for assistance.'}`);
     } finally {
       setLoading(false);
     }
@@ -346,7 +408,7 @@ const ApplyLoan = () => {
             Personal Information
           </Typography>
           <Typography variant="body1" sx={{ opacity: 0.9 }}>
-            Please provide your personal details accurately as per your official documents
+            Enter your personal details as they appear on your official documents
           </Typography>
         </Box>
       </Paper>
@@ -569,7 +631,7 @@ const ApplyLoan = () => {
           Document Upload
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Please upload clear, readable copies of your documents (PDF, JPG, PNG - Max 5MB each)
+          Upload clear, readable copies of your documents (PDF, JPG, PNG - Max 5MB each)
         </Typography>
         <Grid container spacing={3}>
           {[
@@ -628,7 +690,7 @@ const ApplyLoan = () => {
             Employment Information
           </Typography>
           <Typography variant="body1" sx={{ opacity: 0.9 }}>
-            Tell us about your current employment or business details
+            Enter your current employment or business information
           </Typography>
         </Box>
       </Paper>
@@ -720,7 +782,7 @@ const ApplyLoan = () => {
           Employment Documents
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Please upload the required employment documents (PDF, JPG, PNG - Max 5MB each)
+          Upload the required employment documents (PDF, JPG, PNG - Max 5MB each)
         </Typography>
         <Grid container spacing={3}>
           {(
@@ -816,7 +878,7 @@ const ApplyLoan = () => {
             Loan Requirements
           </Typography>
           <Typography variant="body1" sx={{ opacity: 0.9 }}>
-            Tell us about your loan requirements and intended purpose
+            Specify your loan requirements and intended purpose
           </Typography>
         </Box>
       </Paper>
@@ -890,7 +952,7 @@ const ApplyLoan = () => {
           Loan Specific Documents
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Please upload documents specific to your loan type
+          Upload documents specific to your loan type
         </Typography>
         <Grid container spacing={3}>
       
@@ -1096,7 +1158,7 @@ const ApplyLoan = () => {
               Existing Loans & EMIs
             </Typography>
             <Typography variant="body1" sx={{ opacity: 0.9 }}>
-              Please provide details of any existing loans or EMIs you currently have
+              List any existing loans or EMIs you currently have
             </Typography>
           </Box>
         </Paper>
@@ -1240,7 +1302,7 @@ const ApplyLoan = () => {
               Personal References
             </Typography>
             <Typography variant="body1" sx={{ opacity: 0.9 }}>
-              Please provide at least 2 references who can vouch for your character and reliability
+              Add at least 2 references who can verify your character and reliability
             </Typography>
           </Box>
         </Paper>

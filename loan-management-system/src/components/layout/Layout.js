@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Drawer,
@@ -50,9 +50,23 @@ const Layout = ({ children, userType }) => {
   const { user, logout } = useAuth();
   const { notifications, getNotifications } = useLoan();
 
-  // Derive unread count based on role-specific visibility
-  const roleUnread = userType && user ? getNotifications(user.id, userType).filter(n => !n.read).length : 0;
-  const unreadNotifications = roleUnread;
+  // Derive unread count from notifications state
+  const unreadNotifications = Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0;
+
+  // Real-time notification polling for live backend updates
+  useEffect(() => {
+    if (userType === 'customer') {
+      // Load notifications when component mounts
+      getNotifications();
+      
+      // Set up real-time polling every 5 seconds for production-like behavior
+      const interval = setInterval(() => {
+        getNotifications();
+      }, 5000); // 5 seconds for real-time feel
+
+      return () => clearInterval(interval);
+    }
+  }, [userType, getNotifications]);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);

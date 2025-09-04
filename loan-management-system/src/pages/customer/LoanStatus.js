@@ -38,6 +38,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLoan } from '../../context/LoanContext';
 import { motion } from 'framer-motion';
+import loanService from '../../services/loanService';
 
 const LoanStatus = () => {
   const navigate = useNavigate();
@@ -52,9 +53,36 @@ const LoanStatus = () => {
 
   const loadApplications = async () => {
     setLoading(true);
-    const result = await getApplications({ userId: user.id });
-    if (result.success) {
-      setApplications(result.applications);
+    try {
+      // Fetch from backend API only to avoid duplicates
+      const backendApplications = await loanService.getMyLoans();
+      
+      // Remove duplicates based on ID
+      const uniqueApplications = backendApplications.filter((app, index, self) => 
+        index === self.findIndex(a => a.id === app.id)
+      );
+      
+      setApplications(uniqueApplications);
+    } catch (error) {
+      console.error('Error loading applications:', error);
+      // Fallback to local context only if backend fails
+      const result = await getApplications({ userId: user?.id || 'guest' });
+      if (result.success) {
+        const localApps = result.applications.map(app => ({
+          ...app,
+          id: app.applicationId,
+          status: app.status?.toUpperCase() || 'PENDING',
+          applicationDate: app.submittedAt,
+          loanTermMonths: parseInt(app.loanDuration) * 12
+        }));
+        
+        // Remove duplicates from local apps too
+        const uniqueLocalApps = localApps.filter((app, index, self) => 
+          index === self.findIndex(a => a.id === app.id)
+        );
+        
+        setApplications(uniqueLocalApps);
+      }
     }
     setLoading(false);
   };

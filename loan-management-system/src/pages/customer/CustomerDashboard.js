@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Grid,
@@ -9,25 +9,57 @@ import {
   Container,
   Paper,
   Avatar,
+  CircularProgress,
+  Divider,
 } from '@mui/material';
 import {
   Assignment,
   Notifications as NotificationsIcon,
   AccountBalance,
   ArrowForward,
+  TrendingUp,
+  CheckCircle,
+  Schedule,
+  CurrencyRupee,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { motion } from 'framer-motion';
+import loanService from '../../services/loanService';
 
 const CustomerDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    setLoading(true);
+    try {
+      const stats = await loanService.getDashboardStats();
+      setDashboardStats(stats);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      // Set default stats if API fails
+      setDashboardStats({
+        totalLoans: 0,
+        approvedLoans: 0,
+        pendingLoans: 0,
+        totalApprovedAmount: 0,
+        unreadNotifications: 0
+      });
+    }
+    setLoading(false);
+  };
 
   const menuOptions = [
     {
       title: 'Apply for Loan',
-      description: 'Start a new loan application with our simple step-by-step process',
+      description: 'Submit a new loan application using our streamlined process',
       icon: <Assignment sx={{ fontSize: 60, color: '#020b43' }} />,
       path: '/customer/apply-loan',
       color: '#020b43',
@@ -90,6 +122,117 @@ const CustomerDashboard = () => {
           </Box>
         </Paper>
       </motion.div>
+
+      {/* Dashboard Statistics */}
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+        >
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card 
+                elevation={3} 
+                sx={{ 
+                  borderRadius: 3, 
+                  textAlign: 'center', 
+                  height: 180,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}
+              >
+                <CardContent sx={{ py: 3 }}>
+                  <TrendingUp sx={{ fontSize: 40, color: '#2196f3', mb: 2 }} />
+                  <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#2196f3', mb: 1 }}>
+                    {dashboardStats?.totalLoans || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    Total Applications
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={3}>
+              <Card 
+                elevation={3} 
+                sx={{ 
+                  borderRadius: 3, 
+                  textAlign: 'center', 
+                  height: 180,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}
+              >
+                <CardContent sx={{ py: 3 }}>
+                  <CheckCircle sx={{ fontSize: 40, color: '#2196f3', mb: 2 }} />
+                  <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#2196f3', mb: 1 }}>
+                    {dashboardStats?.approvedLoans || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    Approved Loans
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={3}>
+              <Card 
+                elevation={3} 
+                sx={{ 
+                  borderRadius: 3, 
+                  textAlign: 'center', 
+                  height: 180,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}
+              >
+                <CardContent sx={{ py: 3 }}>
+                  <Schedule sx={{ fontSize: 40, color: '#2196f3', mb: 2 }} />
+                  <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#2196f3', mb: 1 }}>
+                    {dashboardStats?.pendingLoans || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    Pending Review
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={3}>
+              <Card 
+                elevation={3} 
+                sx={{ 
+                  borderRadius: 3, 
+                  textAlign: 'center', 
+                  height: 180,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}
+              >
+                <CardContent sx={{ py: 3 }}>
+                  <CurrencyRupee sx={{ fontSize: 40, color: '#2196f3', mb: 2 }} />
+                  <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#2196f3', mb: 1 }}>
+                    ₹{(dashboardStats?.totalApprovedAmount || 0).toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    Total Approved Amount
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </motion.div>
+      )}
 
       {/* Main Menu Options */}
       <Grid container spacing={4} alignItems="stretch">

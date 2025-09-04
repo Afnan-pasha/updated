@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import loanService from '../services/loanService';
 
 const LoanContext = createContext();
 
@@ -66,23 +67,17 @@ const loanReducer = (state, action) => {
         error: null,
       };
     case LOAN_ACTIONS.CREATE_APPLICATION:
-      // Persist new application
-      const createdApps = [...state.applications, action.payload];
-      localStorage.setItem('loanApplications', JSON.stringify(createdApps));
       return {
         ...state,
-        applications: createdApps,
+        applications: [...state.applications, action.payload],
         loading: false,
       };
     case LOAN_ACTIONS.UPDATE_APPLICATION:
-      // Persist and update
-      const updatedApps = state.applications.map(app =>
-        app.id === action.payload.id ? action.payload : app
-      );
-      localStorage.setItem('loanApplications', JSON.stringify(updatedApps));
       return {
         ...state,
-        applications: updatedApps,
+        applications: state.applications.map(app =>
+          app.id === action.payload.id ? action.payload : app
+        ),
         currentApplication: action.payload,
         loading: false,
       };
@@ -99,11 +94,9 @@ const loanReducer = (state, action) => {
         loading: false,
       };
     case LOAN_ACTIONS.ADD_NOTIFICATION:
-      const newNotifs = [action.payload, ...state.notifications];
-      localStorage.setItem('loanNotifications', JSON.stringify(newNotifs));
       return {
         ...state,
-        notifications: newNotifs,
+        notifications: [action.payload, ...state.notifications],
       };
     case LOAN_ACTIONS.SET_NOTIFICATIONS:
       return {
@@ -111,13 +104,11 @@ const loanReducer = (state, action) => {
         notifications: action.payload,
       };
     case LOAN_ACTIONS.MARK_NOTIFICATION_READ:
-      const readNotifs = state.notifications.map(notif =>
-        notif.id === action.payload ? { ...notif, read: true } : notif
-      );
-      localStorage.setItem('loanNotifications', JSON.stringify(readNotifs));
       return {
         ...state,
-        notifications: readNotifs,
+        notifications: state.notifications.map(notif =>
+          notif.id === action.payload ? { ...notif, read: true } : notif
+        ),
       };
     default:
       return state;
@@ -128,31 +119,27 @@ const loanReducer = (state, action) => {
 export const LoanProvider = ({ children }) => {
   const [state, dispatch] = useReducer(loanReducer, initialState);
 
-  // Load data from localStorage on mount
+  // Load data from backend on mount
   useEffect(() => {
-    const loadData = () => {
+    const loadData = async () => {
       try {
-        const applications = JSON.parse(localStorage.getItem('loanApplications') || '[]');
-        const notifications = JSON.parse(localStorage.getItem('loanNotifications') || '[]');
-        
+        // Load applications from backend
+        const applications = await loanService.getMyLoans();
         dispatch({ type: LOAN_ACTIONS.SET_APPLICATIONS, payload: applications });
+        
+        // Load notifications from backend
+        const notifications = await loanService.getNotifications();
         dispatch({ type: LOAN_ACTIONS.SET_NOTIFICATIONS, payload: notifications });
       } catch (error) {
-        console.error('Error loading loan data:', error);
+        console.error('Error loading loan data from backend:', error);
+        // Fallback to empty arrays if backend fails
+        dispatch({ type: LOAN_ACTIONS.SET_APPLICATIONS, payload: [] });
+        dispatch({ type: LOAN_ACTIONS.SET_NOTIFICATIONS, payload: [] });
       }
     };
     
     loadData();
   }, []);
-
-  // Save to localStorage whenever applications or notifications change
-  useEffect(() => {
-    localStorage.setItem('loanApplications', JSON.stringify(state.applications));
-  }, [state.applications]);
-
-  useEffect(() => {
-    localStorage.setItem('loanNotifications', JSON.stringify(state.notifications));
-  }, [state.notifications]);
 
   // Mock CIBIL score generator
   const generateCibilScore = () => {
@@ -181,15 +168,26 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Call backend API to create loan application
+      const backendApplication = await loanService.applyForLoan({
+        loanType: applicationData.loanType,
+        loanAmount: applicationData.loanAmount,
+        interestRate: applicationData.interestRate || 12.5,
+        loanTermMonths: applicationData.loanDuration,
+        purpose: applicationData.loanPurpose,
+        collateral: applicationData.collateral || 'None'
+      });
       
+      // Create frontend application object with backend data
       const application = {
         ...applicationData,
-        id: 'APP' + Date.now(),
+        id: backendApplication.id,
+        backendId: backendApplication.id,
         status: APPLICATION_STATUS.SUBMITTED,
         submittedAt: new Date().toISOString(),
         cibilScore: generateCibilScore(),
+        monthlyEmi: backendApplication.monthlyEmi,
+        totalAmount: backendApplication.totalAmount,
         statusHistory: [
           {
             status: APPLICATION_STATUS.SUBMITTED,
@@ -263,10 +261,8 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Always read the full source of truth from localStorage to avoid stale/filtered state
-      const allApps = JSON.parse(localStorage.getItem('loanApplications') || '[]');
+      // Fetch from backend API
+      const allApps = await loanService.getMyLoans();
       let filteredApplications = [...allApps];
       
       if (filters.userId) {
@@ -289,7 +285,6 @@ export const LoanProvider = ({ children }) => {
         );
       }
       
-      // Keep state.applications as the full dataset; filtering is done in pages
       dispatch({ type: LOAN_ACTIONS.SET_APPLICATIONS, payload: allApps });
       return { success: true, applications: filteredApplications };
     } catch (error) {
@@ -303,13 +298,7 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const application = state.applications.find(app => app.id === applicationId);
-      
-      if (!application) {
-        throw new Error('Application not found');
-      }
+      const application = await loanService.getLoanDetails(applicationId);
       
       dispatch({ type: LOAN_ACTIONS.SET_CURRENT_APPLICATION, payload: application });
       return { success: true, application };
@@ -324,51 +313,16 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const application = state.applications.find(app => app.id === applicationId);
-      if (!application) {
-        throw new Error('Application not found');
-      }
-      
-      const updatedApplication = {
-        ...application,
-        status: APPLICATION_STATUS.MAKER_APPROVED,
-        makerComments: comments,
-        makerApprovedAt: new Date().toISOString(),
-        statusHistory: [
-          ...application.statusHistory,
-          {
-            status: APPLICATION_STATUS.MAKER_APPROVED,
-            timestamp: new Date().toISOString(),
-            comments: comments,
-            updatedBy: 'maker',
-          }
-        ]
-      };
-      
-      // Persist to localStorage immediately so other role views see latest
-      const allApps = JSON.parse(localStorage.getItem('loanApplications') || '[]');
-      const persisted = allApps.map(a => a.id === updatedApplication.id ? updatedApplication : a);
-      localStorage.setItem('loanApplications', JSON.stringify(persisted));
+      const updatedApplication = await loanService.updateLoanStatus(applicationId, 'APPROVED');
       
       dispatch({ type: LOAN_ACTIONS.UPDATE_APPLICATION, payload: updatedApplication });
       
-      // Notify customer
+      // Create notifications
       createNotification(
-        application.userId,
+        'customer',
         'Application Approved by Maker',
         `Your loan application ${applicationId} has been approved by the loan officer and forwarded to senior review.`,
         'success',
-        applicationId
-      );
-      
-      // Notify checkers
-      createNotification(
-        'all_checkers',
-        'Application for Final Review',
-        `Loan application ${applicationId} approved by maker and ready for final review.`,
-        'info',
         applicationId
       );
       
@@ -384,34 +338,13 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const application = state.applications.find(app => app.id === applicationId);
-      if (!application) {
-        throw new Error('Application not found');
-      }
-      
-      const updatedApplication = {
-        ...application,
-        status: APPLICATION_STATUS.MAKER_REJECTED,
-        makerComments: comments,
-        makerRejectedAt: new Date().toISOString(),
-        statusHistory: [
-          ...application.statusHistory,
-          {
-            status: APPLICATION_STATUS.MAKER_REJECTED,
-            timestamp: new Date().toISOString(),
-            comments: comments,
-            updatedBy: 'maker',
-          }
-        ]
-      };
+      const updatedApplication = await loanService.updateLoanStatus(applicationId, 'REJECTED');
       
       dispatch({ type: LOAN_ACTIONS.UPDATE_APPLICATION, payload: updatedApplication });
       
-      // Notify customer
+      // Create notification
       createNotification(
-        application.userId,
+        'customer',
         'Application Rejected',
         `Your loan application ${applicationId} has been rejected by the loan officer. Reason: ${comments}`,
         'error',
@@ -430,41 +363,19 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const application = state.applications.find(app => app.id === applicationId);
-      if (!application) {
-        throw new Error('Application not found');
-      }
-      
-      const updatedApplication = {
-        ...application,
-        status: APPLICATION_STATUS.FINAL_APPROVED,
-        checkerComments: comments,
-        finalApprovedAt: new Date().toISOString(),
-        statusHistory: [
-          ...application.statusHistory,
-          {
-            status: APPLICATION_STATUS.FINAL_APPROVED,
-            timestamp: new Date().toISOString(),
-            comments: comments,
-            updatedBy: 'checker',
-          }
-        ]
-      };
+      const updatedApplication = await loanService.updateLoanStatus(applicationId, 'DISBURSED');
       
       dispatch({ type: LOAN_ACTIONS.UPDATE_APPLICATION, payload: updatedApplication });
       
-      // Notify customer
+      // Create notification
       createNotification(
-        application.userId,
+        'customer',
         'Loan Approved!',
         `Congratulations! Your loan application ${applicationId} has been approved. You will receive further instructions shortly.`,
         'success',
         applicationId
       );
       
-      // Per requirements: no maker notification on final approval
       return { success: true, application: updatedApplication };
     } catch (error) {
       dispatch({ type: LOAN_ACTIONS.SET_ERROR, payload: error.message });
@@ -477,41 +388,19 @@ export const LoanProvider = ({ children }) => {
     dispatch({ type: LOAN_ACTIONS.SET_LOADING, payload: true });
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const application = state.applications.find(app => app.id === applicationId);
-      if (!application) {
-        throw new Error('Application not found');
-      }
-      
-      const updatedApplication = {
-        ...application,
-        status: APPLICATION_STATUS.FINAL_REJECTED,
-        checkerComments: comments,
-        finalRejectedAt: new Date().toISOString(),
-        statusHistory: [
-          ...application.statusHistory,
-          {
-            status: APPLICATION_STATUS.FINAL_REJECTED,
-            timestamp: new Date().toISOString(),
-            comments: comments,
-            updatedBy: 'checker',
-          }
-        ]
-      };
+      const updatedApplication = await loanService.updateLoanStatus(applicationId, 'REJECTED');
       
       dispatch({ type: LOAN_ACTIONS.UPDATE_APPLICATION, payload: updatedApplication });
       
-      // Notify customer
+      // Create notification
       createNotification(
-        application.userId,
+        'customer',
         'Loan Application Rejected',
         `Your loan application ${applicationId} has been rejected after final review. Reason: ${comments}`,
         'error',
         applicationId
       );
       
-      // Per requirements: no maker notification on final rejection
       return { success: true, application: updatedApplication };
     } catch (error) {
       dispatch({ type: LOAN_ACTIONS.SET_ERROR, payload: error.message });
@@ -520,28 +409,25 @@ export const LoanProvider = ({ children }) => {
   };
 
   // Get notifications for user
-  // Filter notifications by role, per requirements
-  // - Customer: only their own events (submitted, maker approved/rejected, final approved/rejected)
-  // - Maker: only when customer submits a new application
-  // - Checker: only when maker approves (ready for final review)
-  const getNotifications = (userId, userRole) => {
-    const all = state.notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    if (userRole === 'customer') {
-      return all.filter(n => n.userId === userId);
+  const getNotifications = async (userId, userRole) => {
+    try {
+      const notifications = await loanService.getNotifications();
+      dispatch({ type: LOAN_ACTIONS.SET_NOTIFICATIONS, payload: notifications });
+      return notifications;
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      return [];
     }
-    if (userRole === 'maker') {
-      return all.filter(n => n.userId === 'all_makers');
-    }
-    if (userRole === 'checker') {
-      return all.filter(n => n.userId === 'all_checkers');
-    }
-    return [];
   };
 
   // Mark notification as read
-  const markNotificationRead = (notificationId) => {
-    dispatch({ type: LOAN_ACTIONS.MARK_NOTIFICATION_READ, payload: notificationId });
+  const markNotificationRead = async (notificationId) => {
+    try {
+      await loanService.markNotificationAsRead(notificationId);
+      dispatch({ type: LOAN_ACTIONS.MARK_NOTIFICATION_READ, payload: notificationId });
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
   };
 
   // Mark all notifications as read for a user/role view
